@@ -1,0 +1,52 @@
+stages:
+  - deploy
+  - apply
+
+before_script:
+  - 'which ssh-agent || ( apt-get update -y && apt-get install openssh-client -y )' # In case ssh needs installing
+  - eval $(ssh-agent -s)
+  - echo "$RUNNER_SSH_KEY" | tr -d '\r' | ssh-add -
+
+deploy_puppet_code:
+  stage: deploy
+  tags:
+    - puppet
+  script:
+    - ssh-add -l  # List SSH keys loaded into the agent
+    #- ssh root@puppet -o StrictHostKeyChecking=no 'whoami' 
+    - echo "Deploying Puppet code to Puppet Server..."
+    - ssh root@puppet -o StrictHostKeyChecking=no 'cd /etc/puppetlabs/code/environments/production && git pull origin main'
+  only:
+    - main
+
+apply_puppet_agents:
+  stage: apply
+  tags:
+    - puppet
+  script:
+    - echo "Applying Puppet configuration on Ubuntu agent..."
+    - |
+      ssh root@ubuntu -o StrictHostKeyChecking=no '
+        puppet agent --test;
+        EXIT_CODE=$?; # https://www.puppet.com/docs/puppet/8/man/agent#:~:text=If%20enabled%2C%20'puppet%20agent',and%20some%20resources%20were%20changed.
+        if [ $EXIT_CODE -eq 0 ]; then
+          echo "Puppet run succeeded with no changes.";
+          exit 0;
+        elif [ $EXIT_CODE -eq 2 ]; then
+          echo "Puppet run succeeded with resource changes.";
+          exit 0;
+        elif [ $EXIT_CODE -eq 4 ]; then
+          echo "Puppet run succeeded with some resource failures.";
+          exit 1;
+        elif [ $EXIT_CODE -eq 6 ]; then
+          echo "Puppet run succeeded with resource changes and failures.";
+          exit 1;
+        else
+          echo "Puppet run failed with exit code $EXIT_CODE.";
+          exit $EXIT_CODE;
+        fi
+      '
+  only:
+    - main
+  needs:
+    - deploy_puppet_code

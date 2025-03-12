@@ -1,0 +1,13 @@
+AllowAgentForwarding yes
+PermitTunnel yes
+GatewayPorts yes
+PubkeyAuthentication yes
+PasswordAuthentication no
+AllowStreamLocalForwarding yes
+PermitRootLogin yes
+
+# If you also create a user dedicated for abusing ProxyJump, you can permit their account to be used for -J but no others.
+#Match User proxyuser
+#    AllowTcpForwarding yes
+#    PermitOpen any
+#    X11Forwarding yes
