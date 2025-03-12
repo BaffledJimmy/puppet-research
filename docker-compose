@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  gitlab:
+    image: gitlab/gitlab-ce:latest
+    container_name: gitlab
+    hostname: gitlab
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "2222:22"
+    volumes:
+      - gitlab_config:/etc/gitlab
+      - gitlab_logs:/var/log/gitlab
+      - gitlab_data:/var/opt/gitlab
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://gitlab'
+        gitlab_rails['gitlab_shell_ssh_port'] = 22
+    networks:
+      - devnet
+
+
+  puppet:
+    image: voxpupuli/puppetserver:latest
+    container_name: puppet
+    hostname: puppet
+    restart: always
+    ports:
+      - "8140:8140"
+    environment:
+      PUPPETSERVER_HOSTNAME: puppet
+      CERTNAME: puppet
+      DNS_ALT_NAMES: puppet,puppet.local
+      AUTOSIGN: "true"
+      CA_ENABLED: "true"
+      PUPPETSERVER_JAVA_ARGS: "-Xms512m -Xmx512m"
+      PUPPETSERVER_ENVIRONMENT_TIMEOUT: "0"
+    volumes:
+      - puppet_code:/etc/puppetlabs/code
+      - puppet_ssl:/etc/puppetlabs/puppet/ssl
+    networks:
+      - devnet
+
+
+  gitlab-runner:
+    image: gitlab/gitlab-runner:latest
+    container_name: gitlab-runner
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gitlab_runner_config:/etc/gitlab-runner
+    networks:
+      - devnet
+
+  ubuntu:
+    image: ubuntu:latest
+    container_name: ubuntu
+    hostname: ubuntu
+    restart: always
+    command: sleep infinity  # Keeps it running
+    networks:
+      - devnet
+
+networks:
+  devnet:
+    driver: bridge
+
+volumes:
+  gitlab_config:
+  gitlab_logs:
+  gitlab_data:
+  puppet_code:
+  puppet_ssl:
+
+  gitlab_runner_config:
