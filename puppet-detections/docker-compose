@@ -1,0 +1,141 @@
+version: '3.8'
+
+services:
+  gitlab:
+    image: gitlab/gitlab-ce:latest
+    container_name: gitlab
+    hostname: gitlab
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "2222:22"
+    volumes:
+      - gitlab_config:/etc/gitlab
+      - gitlab_logs:/var/log/gitlab
+      - gitlab_data:/var/opt/gitlab
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://gitlab'
+        gitlab_rails['gitlab_shell_ssh_port'] = 22
+    networks:
+      - devnet
+
+  puppet:
+    image: voxpupuli/puppetserver:latest
+    container_name: puppet
+    hostname: puppet
+    restart: always
+    ports:
+      - "8140:8140"
+    environment:
+      PUPPETSERVER_HOSTNAME: puppet
+      CERTNAME: puppet
+      DNS_ALT_NAMES: puppet,puppet.local
+      AUTOSIGN: "true"
+      PUPPETSERVER_JAVA_ARGS: "-Xms512m -Xmx512m"
+      PUPPETSERVER_ENVIRONMENT_TIMEOUT: "0"
+      PUPPETDB_SERVER_URLS: "https://puppetdb:8081"
+      PUPPET_REPORTS: "puppetdb"
+      PUPPET_STORECONFIGS: "true"
+      PUPPET_STORECONFIGS_BACKEND: "puppetdb"
+      PUPPETDB_DISABLE_SSL_VERIFY: "true"
+      PUPPETSERVER_ALLOW_DYNAMIC_CAS: "true"
+    volumes:
+      - puppet_code:/etc/puppetlabs/code
+      - puppet_etc:/etc/puppetlabs/puppet  # Single volume for SSL and config
+      - puppet_data:/var/lib/puppet  # Persist reports & facts
+    networks:
+      - devnet
+    depends_on:
+      - puppetdb
+
+  puppetdb:
+    image: voxpupuli/puppetdb
+    container_name: puppetdb
+    restart: always
+    hostname: puppetdb
+    environment:
+      PUPPETDB_SSL_HOSTNAME: puppetdb
+      PUPPETDB_POSTGRES_HOSTNAME: postgres
+      PUPPETDB_POSTGRES_PORT: 5432
+      PUPPETDB_POSTGRES_USER: puppetdb
+      PUPPETDB_POSTGRES_PASSWORD: puppetdbpassword
+      PUPPETDB_POSTGRES_DBNAME: puppetdb
+      PUPPETDB_WAITFORSTART: "30"
+    ports:
+      - "8081:8081"
+    volumes:
+      - puppetdb_data:/var/lib/puppetdb
+    networks:
+      - devnet
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:14
+    container_name: postgres
+    restart: always
+    hostname: postgres
+    environment:
+      POSTGRES_USER: puppetdb
+      POSTGRES_PASSWORD: puppetdbpassword
+      POSTGRES_DB: puppetdb
+      POSTGRES_HOST_AUTH_METHOD: trust  # Disables password auth
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - devnet
+
+  puppetboard:
+    image: voxpupuli/puppetboard
+    container_name: puppetboard
+    restart: always
+    environment:
+      PUPPETDB_HOST: puppetdb
+      PUPPETDB_PORT: 8081
+      PUPPETDB_SSL_VERIFY: "false"  # Disables SSL verification
+      PUPPETDB_PROTO: "https"       # Forces HTTPS 
+      SECRET_KEY: "secretkey"  
+    ports:
+      - "5000:5000"
+      - "8080:80"
+    networks:
+      - devnet
+    depends_on:
+      - puppetdb
+
+  gitlab-runner:
+    image: gitlab/gitlab-runner:latest
+    container_name: gitlab-runner
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gitlab_runner_config:/etc/gitlab-runner
+    networks:
+      - devnet
+
+  ubuntu:
+    image: ubuntu:latest
+    container_name: ubuntu
+    hostname: ubuntu
+    restart: always
+    command: ["/bin/bash", "-c", "apt update && apt install -y openssh-server nano puppet-agent && service ssh start && sleep infinity"]
+
+    networks:
+      - devnet
+
+networks:
+  devnet:
+    driver: bridge
+
+volumes:
+  gitlab_config:
+  gitlab_logs:
+  gitlab_data:
+  puppet_code:
+  puppet_etc:    
+  puppet_data:   
+  puppetdb_data:
+  postgres_data:
+  gitlab_runner_config:
