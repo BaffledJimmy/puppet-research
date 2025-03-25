@@ -1,6 +1,9 @@
 version: '3.8'
 
 services:
+  #######################
+  # GitLab & CI Runner #
+  #######################
   gitlab:
     image: gitlab/gitlab-ce:latest
     container_name: gitlab
@@ -21,6 +24,19 @@ services:
     networks:
       - devnet
 
+  gitlab-runner:
+    image: gitlab/gitlab-runner:latest
+    container_name: gitlab-runner
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gitlab_runner_config:/etc/gitlab-runner
+    networks:
+      - devnet
+
+  ######################
+  # Puppet Server & DB #
+  ######################
   puppet:
     image: voxpupuli/puppetserver:latest
     container_name: puppet
@@ -40,15 +56,12 @@ services:
       PUPPET_STORECONFIGS: "true"
       PUPPET_STORECONFIGS_BACKEND: "puppetdb"
       PUPPETDB_DISABLE_SSL_VERIFY: "true"
-      PUPPETSERVER_ALLOW_DYNAMIC_CAS: "true"
     volumes:
       - puppet_code:/etc/puppetlabs/code
-      - puppet_etc:/etc/puppetlabs/puppet  # Single volume for SSL and config
-      - puppet_data:/var/lib/puppet  # Persist reports & facts
+      - puppet_etc:/etc/puppetlabs/puppet
+      - puppet_data:/var/lib/puppet
     networks:
       - devnet
-    depends_on:
-      - puppetdb
 
   puppetdb:
     image: voxpupuli/puppetdb
@@ -60,9 +73,8 @@ services:
       PUPPETDB_POSTGRES_HOSTNAME: postgres
       PUPPETDB_POSTGRES_PORT: 5432
       PUPPETDB_POSTGRES_USER: puppetdb
-      PUPPETDB_POSTGRES_PASSWORD: puppetdbpassword
+      PUPPETDB_POSTGRES_PASSWORD: password123
       PUPPETDB_POSTGRES_DBNAME: puppetdb
-      PUPPETDB_WAITFORSTART: "30"
     ports:
       - "8081:8081"
     volumes:
@@ -71,6 +83,7 @@ services:
       - devnet
     depends_on:
       - postgres
+      - puppet
 
   postgres:
     image: postgres:14
@@ -79,49 +92,77 @@ services:
     hostname: postgres
     environment:
       POSTGRES_USER: puppetdb
-      POSTGRES_PASSWORD: puppetdbpassword
+      POSTGRES_PASSWORD: password123
       POSTGRES_DB: puppetdb
-      POSTGRES_HOST_AUTH_METHOD: trust  # Disables password auth
+      POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - devnet
 
-  puppetboard:
-    image: voxpupuli/puppetboard
-    container_name: puppetboard
+  ###########################
+  # Elastdocker (Full ELK)  #
+  ###########################
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.3
+    container_name: elasticsearch
     restart: always
     environment:
-      PUPPETDB_HOST: puppetdb
-      PUPPETDB_PORT: 8081
-      PUPPETDB_SSL_VERIFY: "false"  # Disables SSL verification
-      PUPPETDB_PROTO: "https"       # Forces HTTPS 
-      SECRET_KEY: "secretkey"  
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - ELASTIC_PASSWORD=password123
+      - ELASTIC_USERNAME=elasticuser  # Kibana cannot use 'elastic'
     ports:
-      - "5000:5000"
-      - "8080:80"
-    networks:
-      - devnet
-    depends_on:
-      - puppetdb
-
-  gitlab-runner:
-    image: gitlab/gitlab-runner:latest
-    container_name: gitlab-runner
-    restart: always
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - gitlab_runner_config:/etc/gitlab-runner
+      - "9200:9200"
     networks:
       - devnet
 
+  puppetboard:
+      image: voxpupuli/puppetboard
+      container_name: puppetboard
+      restart: always
+      environment:
+        PUPPETDB_HOST: puppetdb
+        PUPPETDB_PORT: 8081
+        PUPPETDB_SSL_VERIFY: "false"  # Disables SSL verification
+        PUPPETDB_PROTO: "https"       # Forces HTTPS for connections
+        SECRET_KEY: "secretkey"  # Set a strong secret key
+      ports:
+        - "5000:5000"
+        - "8080:80"
+      networks:
+        - devnet
+      depends_on:
+        - puppetdb
+
+
+  ###################
+  # Linux Containers #
+  ###################
   ubuntu:
     image: ubuntu:latest
     container_name: ubuntu
     hostname: ubuntu
     restart: always
     command: ["/bin/bash", "-c", "apt update && apt install -y openssh-server nano puppet-agent && service ssh start && sleep infinity"]
+    networks:
+      - devnet
 
+  centos:
+    image: centos:latest
+    container_name: centos
+    hostname: centos
+    restart: always
+    command: ["/bin/bash", "-c", "yum install -y openssh-server curl nano puppet-agent && systemctl enable --now sshd && sleep infinity"]
+    networks:
+      - devnet
+
+  debian:
+    image: debian:latest
+    container_name: debian
+    hostname: debian
+    restart: always
+    command: ["/bin/bash", "-c", "apt-get update && apt-get install -y openssh-server puppet-agent curl && service ssh start && sleep infinity"]
     networks:
       - devnet
 
@@ -134,8 +175,8 @@ volumes:
   gitlab_logs:
   gitlab_data:
   puppet_code:
-  puppet_etc:    
-  puppet_data:   
+  puppet_etc:
+  puppet_data:
   puppetdb_data:
   postgres_data:
   gitlab_runner_config:
